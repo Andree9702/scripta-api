@@ -14,17 +14,19 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 // In-memory rate limit store (resets on cold start — fine for MVP)
 const rateLimitMap = new Map();
 
-const SYSTEM_PROMPT = `Eres un redactor académico experto de Scripta Academic. Genera UN SOLO párrafo académico de demostración (150–250 palabras) sobre el tema proporcionado.
+const SYSTEM_PROMPT = `Eres un redactor académico experto del servicio Scripta Academic. Tu tarea es generar UN SOLO párrafo académico de demostración (180–250 palabras) sobre el tema proporcionado.
 
-Reglas:
-- Escribe en español académico formal
-- Usa terminología especializada de la disciplina indicada
-- Incluye 2–3 citas ficticias pero realistas en formato APA 7 (ej: García-López et al., 2023; Müller & Chen, 2024)
-- El párrafo debe ser del tipo indicado (introducción, marco teórico, discusión o conclusión)
-- NO incluyas título ni encabezado, solo el párrafo
-- El texto debe demostrar rigor científico, cohesión textual y dominio disciplinar
-- Termina con una oración de transición que sugiera continuidad
-- Este es un DEMO para mostrar calidad, hazlo impresionante`;
+INSTRUCCIONES ESTRICTAS:
+1. Escribe en español académico formal con terminología especializada de la disciplina indicada
+2. El párrafo debe ser del tipo indicado (introducción, marco teórico, discusión o conclusión)
+3. Incluye exactamente 3 citas en formato APA 7 con autores y años verosímiles (ej: García-López et al., 2023; Müller & Chen, 2024; Rodríguez-Vega & Thompson, 2025)
+4. Las citas deben estar integradas naturalmente en el texto, no amontonadas al final
+5. Demuestra dominio de conectores académicos: "En este contexto,", "No obstante,", "Resulta pertinente señalar que", "De manera análoga,", "En concordancia con lo expuesto,"
+6. El texto debe tener cohesión interna impecable — cada oración debe conectar lógicamente con la anterior
+7. Termina con una oración de transición que sugiera continuidad hacia el siguiente párrafo
+8. NO incluyas título, encabezado, ni etiquetas — solo el párrafo puro
+9. Este es un DEMO comercial — debe ser TAN bueno que el cliente quiera contratar inmediatamente
+10. Evita frases genéricas como "es importante mencionar" o "cabe destacar" — sé específico y técnico`;
 
 function stripHtml(str) {
   return str.replace(/<[^>]*>/g, '').trim();
@@ -65,7 +67,24 @@ function cleanupRateLimitMap() {
   }
 }
 
+const ALLOWED_ORIGINS = [
+  'https://scriptaacademic.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
 export default async function handler(req, res) {
+  // CORS
+  setCorsHeaders(req, res);
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -107,6 +126,14 @@ export default async function handler(req, res) {
 
   const disc = stripHtml(String(disciplina || 'Ciencias'));
   const tipoTexto = stripHtml(String(tipo || 'Introducción'));
+
+  // Logging for Vercel Dashboard
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    disciplina: disc,
+    tipo: tipoTexto,
+    temaLength: cleanTema.length,
+  }));
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
