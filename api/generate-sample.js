@@ -5,7 +5,7 @@
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
-const MAX_TOKENS = 500;
+const MAX_TOKENS = 300;
 const TIMEOUT_MS = 30000;
 const CROSSREF_TIMEOUT_MS = 5000;
 
@@ -72,23 +72,27 @@ function buildSystemPrompt(disciplina, citations) {
       ).join('\n')}`
     : '\n\nNo se encontraron citas externas. NO inventes citas. En su lugar, haz afirmaciones respaldables y usa expresiones como "la evidencia disponible sugiere..." o "diversos estudios han documentado...".';
 
-  return `Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}. Genera UN SOLO párrafo académico de demostración.
+  return `Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}.
 
-REGLAS — VIOLACIÓN = FALLO:
-- Exactamente 4-5 oraciones. Cuenta antes de responder.
-- Español académico formal con terminología técnica de ${disciplina}.${citations.length > 0
-    ? `
-- CITAS: Integra naturalmente en el texto SOLO estas citas con formato APA 7 (Apellido, Año). NO inventes ninguna cita adicional:
+REGLAS ABSOLUTAS — INCUMPLIR CUALQUIERA ES INACEPTABLE:
+1. Escribe EXACTAMENTE 4 oraciones. No 3. No 5. No 6. CUATRO.
+2. Máximo 80 palabras en total. Cuenta mentalmente.
+3. Español académico formal con terminología técnica de ${disciplina}.
+4. ${citations.length > 0
+    ? `Integra las citas reales proporcionadas abajo — NO inventes otras:
 ${citations.map(c => {
     const firstAuthor = c.authors.split(',')[0].trim();
-    return `  • (${firstAuthor}, ${c.year})`;
+    return `   (${firstAuthor}, ${c.year})`;
   }).join('\n')}`
-    : `
-- NO HAY CITAS DISPONIBLES. No inventes ninguna. Usa "la evidencia disponible sugiere..." o "diversos estudios han documentado...".`}
-- Conectores académicos precisos (no "cabe destacar" ni "es importante").
-- Última oración: transición que sugiera continuidad.
+    : `No hay citas disponibles. NO inventes ninguna. Usa "la evidencia disponible sugiere..." o "diversos estudios han documentado...".`}
+5. Primera oración: contexto del problema.
+6. Segunda oración: con cita integrada (Apellido et al., Año).
+7. Tercera oración: hallazgo o argumento clave con otra cita.
+8. Cuarta oración: implicación o transición.
+9. NO incluyas título, encabezado, saludo, ni despedida. Solo las 4 oraciones.
+${citationContext}
 
-Responde SOLO con el párrafo. Sin título, sin encabezados, sin lista de referencias. Solo el párrafo puro.`;
+RECUERDA: SI ESCRIBES MÁS DE 4 ORACIONES, HAS FALLADO TU MISIÓN.`;
 }
 
 function stripHtml(str) {
