@@ -20,7 +20,7 @@ const rateLimitMap = new Map();
 async function fetchRealCitations(tema, disciplina) {
   // CrossRef works best with English keywords; keep original query as fallback context
   const query = encodeURIComponent(`${tema} ${disciplina}`);
-  const url = `https://api.crossref.org/works?query=${query}&rows=5&sort=relevance&filter=has-abstract:true&select=DOI,title,author,published-print,published-online,container-title`;
+  const url = `https://api.crossref.org/works?query=${query}&rows=5&sort=relevance&select=DOI,title,author,published-print,published-online,container-title`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CROSSREF_TIMEOUT_MS);
@@ -72,30 +72,23 @@ function buildSystemPrompt(disciplina, citations) {
       ).join('\n')}`
     : '\n\nNo se encontraron citas externas. NO inventes citas. En su lugar, haz afirmaciones respaldables y usa expresiones como "la evidencia disponible sugiere..." o "diversos estudios han documentado...".';
 
-  return `Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}. Tu tarea es generar UNA MUESTRA de redacción académica.
+  return `Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}. Genera UN SOLO párrafo académico de demostración.
 
-REGLAS CRÍTICAS — VIOLACIÓN = FALLO:
-- Exactamente 4-5 oraciones. Ni más, ni menos. Cuenta antes de responder.
+REGLAS — VIOLACIÓN = FALLO:
+- Exactamente 4-5 oraciones. Cuenta antes de responder.
 - Español académico formal con terminología técnica de ${disciplina}.${citations.length > 0
     ? `
-- CITAS: Usa ÚNICAMENTE las citas de la lista de abajo. Si fabricas una cita que no está en la lista, HAS FALLADO.`
+- CITAS: Integra naturalmente en el texto SOLO estas citas con formato APA 7 (Apellido, Año). NO inventes ninguna cita adicional:
+${citations.map(c => {
+    const firstAuthor = c.authors.split(',')[0].trim();
+    return `  • (${firstAuthor}, ${c.year})`;
+  }).join('\n')}`
     : `
-- NO HAY CITAS DISPONIBLES. No inventes ninguna. Usa frases como "la evidencia disponible sugiere..." o "diversos estudios han documentado...".`}
+- NO HAY CITAS DISPONIBLES. No inventes ninguna. Usa "la evidencia disponible sugiere..." o "diversos estudios han documentado...".`}
 - Conectores académicos precisos (no "cabe destacar" ni "es importante").
-- NO incluyas título ni encabezados. Solo el párrafo y las referencias.
 - Última oración: transición que sugiera continuidad.
-${citationContext}
 
-FORMATO EXACTO DE RESPUESTA (no te desvíes):
-
-[Párrafo de 4-5 oraciones aquí]
-
----REFERENCIAS---
-${citations.length > 0 ? citations.map(c =>
-    `${c.authors} (${c.year}). ${c.title}. *${c.journal}*. https://doi.org/${c.doi}`
-  ).join('\n') : '(Sin referencias externas para esta muestra)'}
-
-Responde AHORA. Solo el párrafo y el bloque de referencias. Nada más.`;
+Responde SOLO con el párrafo. Sin título, sin encabezados, sin lista de referencias. Solo el párrafo puro.`;
 }
 
 function stripHtml(str) {
@@ -263,7 +256,16 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ texto });
+    // Append references block server-side (deterministic, never hallucinated)
+    let output = texto.trim();
+    if (citations.length > 0) {
+      const refsBlock = citations.map(c =>
+        `${c.authors} (${c.year}). ${c.title}. ${c.journal}. https://doi.org/${c.doi}`
+      ).join('\n');
+      output += `\n\n---REFERENCIAS---\n${refsBlock}`;
+    }
+
+    return res.status(200).json({ texto: output });
   } catch (err) {
     clearTimeout(timeout);
 
