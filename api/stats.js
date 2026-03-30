@@ -6,6 +6,7 @@ export default function handler(req, res) {
     service: 'scripta-api',
     endpoints: [
       { path: '/api/generate-sample', method: 'POST', description: 'Genera muestra académica' },
+      { path: '/api/diagnose-manuscript', method: 'POST', description: 'Diagnóstico de manuscrito (6 dimensiones)' },
       { path: '/api/health', method: 'GET', description: 'Health check' },
       { path: '/api/stats', method: 'GET', description: 'Info del servicio' },
     ],
