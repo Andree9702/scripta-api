@@ -7,6 +7,7 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
 const MAX_TOKENS = 500;
 const TIMEOUT_MS = 30000;
+const CROSSREF_TIMEOUT_MS = 5000;
 
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -14,19 +15,72 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 // In-memory rate limit store (resets on cold start — fine for MVP)
 const rateLimitMap = new Map();
 
-const SYSTEM_PROMPT = `Eres un redactor académico experto del servicio Scripta Academic. Tu tarea es generar UN SOLO párrafo académico de demostración (180–250 palabras) sobre el tema proporcionado.
+// ─── CrossRef citation lookup ──────────────────────────────────────────────────
 
-INSTRUCCIONES ESTRICTAS:
-1. Escribe en español académico formal con terminología especializada de la disciplina indicada
-2. El párrafo debe ser del tipo indicado (introducción, marco teórico, discusión o conclusión)
-3. Incluye exactamente 3 citas en formato APA 7 con autores y años verosímiles (ej: García-López et al., 2023; Müller & Chen, 2024; Rodríguez-Vega & Thompson, 2025)
-4. Las citas deben estar integradas naturalmente en el texto, no amontonadas al final
-5. Demuestra dominio de conectores académicos: "En este contexto,", "No obstante,", "Resulta pertinente señalar que", "De manera análoga,", "En concordancia con lo expuesto,"
-6. El texto debe tener cohesión interna impecable — cada oración debe conectar lógicamente con la anterior
-7. Termina con una oración de transición que sugiera continuidad hacia el siguiente párrafo
-8. NO incluyas título, encabezado, ni etiquetas — solo el párrafo puro
-9. Este es un DEMO comercial — debe ser TAN bueno que el cliente quiera contratar inmediatamente
-10. Evita frases genéricas como "es importante mencionar" o "cabe destacar" — sé específico y técnico`;
+async function fetchRealCitations(tema, disciplina) {
+  const query = encodeURIComponent(`${tema} ${disciplina}`);
+  const url = `https://api.crossref.org/works?query=${query}&rows=3&sort=relevance&select=DOI,title,author,published-print,published-online,container-title`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CROSSREF_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'ScriptaAcademic/1.0 (mailto:info@scriptaacademic.com)' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const data = await response.json();
+
+    return data.message.items.map(item => ({
+      doi: item.DOI,
+      title: item.title?.[0] || '',
+      authors: (item.author || [])
+        .map(a => `${a.family || ''}, ${a.given?.[0] || ''}.`)
+        .slice(0, 3)
+        .join('; '),
+      year: item['published-print']?.['date-parts']?.[0]?.[0]
+        || item['published-online']?.['date-parts']?.[0]?.[0]
+        || '2024',
+      journal: item['container-title']?.[0] || '',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ─── System prompt builder ─────────────────────────────────────────────────────
+
+function buildSystemPrompt(disciplina, citations) {
+  const citationContext = citations.length > 0
+    ? `\n\nCITAS REALES VERIFICADAS (DEBES usar estas, NO inventes otras):\n${citations.map((c, i) =>
+        `${i + 1}. ${c.authors} (${c.year}). ${c.title}. ${c.journal}. DOI: ${c.doi}`
+      ).join('\n')}`
+    : '\n\nNo se encontraron citas externas. NO inventes citas. En su lugar, haz afirmaciones respaldables y usa expresiones como "la evidencia disponible sugiere..." o "diversos estudios han documentado...".';
+
+  return `# IDENTIDAD
+Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}.
+
+# MISIÓN
+Generar un ÚNICO párrafo de demostración académica de MÁXIMO 5 líneas (4-5 oraciones).
+
+# REGLAS ABSOLUTAS
+1. MÁXIMO 5 oraciones. No más. Esto es una muestra, no un artículo.
+2. Español académico formal con terminología técnica de ${disciplina}.
+3. USA EXCLUSIVAMENTE las citas reales proporcionadas abajo. NO inventes citas.
+4. Integra las citas naturalmente con formato APA 7: (Apellido et al., Año)
+5. Cada oración debe aportar contenido sustantivo — cero relleno.
+6. Conectores académicos precisos, no genéricos.
+7. NO incluyas título, encabezado ni etiquetas.
+8. Termina con una oración que sugiera continuidad.
+${citationContext}
+
+# FORMATO DE SALIDA
+Responde SOLO con el párrafo. Nada más. Después del párrafo, agrega una línea en blanco y luego las referencias completas en formato APA 7, cada una con su enlace DOI entre paréntesis.
+
+Ejemplo de formato de referencias:
+García-López, A., & Chen, W. (2023). Título del artículo. Nombre de Revista, 45(2), 123-145. (https://doi.org/10.xxxx/xxxxx)`;
+}
 
 function stripHtml(str) {
   return str.replace(/<[^>]*>/g, '').trim();
@@ -141,7 +195,17 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Error de configuración del servidor.' });
   }
 
-  // Call Anthropic API
+  // Step 1: Fetch real citations from CrossRef
+  const citations = await fetchRealCitations(cleanTema, disc);
+
+  console.log(JSON.stringify({
+    step: 'crossref',
+    citationsFound: citations.length,
+    dois: citations.map(c => c.doi),
+  }));
+
+  // Step 2: Build agent-style prompt with real citations
+  const systemPrompt = buildSystemPrompt(disc, citations);
   const userMessage = `Tema: ${cleanTema}\nDisciplina: ${disc}\nTipo de párrafo: ${tipoTexto}`;
 
   const controller = new AbortController();
@@ -158,7 +222,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: MAX_TOKENS,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       }),
       signal: controller.signal,
