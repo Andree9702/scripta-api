@@ -35,11 +35,8 @@ async function fetchRealCitations(tema, disciplina) {
 
     const items = (data.message?.items || [])
       .filter(item => {
-        // Must have at least one author with a family name and a valid year
-        const hasAuthor = item.author?.some(a => a.family);
-        const year = item['published-print']?.['date-parts']?.[0]?.[0]
-          || item['published-online']?.['date-parts']?.[0]?.[0];
-        return hasAuthor && year && year >= 2015;
+        // Must have at least one author with a family name
+        return item.author?.some(a => a.family);
       })
       .slice(0, 3);
 
@@ -49,12 +46,15 @@ async function fetchRealCitations(tema, disciplina) {
         ? authors.map(a => `${a.family}, ${(a.given || '').charAt(0)}.`).join(' & ')
         : `${authors[0].family}, ${(authors[0].given || '').charAt(0)}., et al.`;
 
+      const year = item['published-print']?.['date-parts']?.[0]?.[0]
+        || item['published-online']?.['date-parts']?.[0]?.[0]
+        || 'n.d.';
+
       return {
         doi: item.DOI,
         title: item.title?.[0] || '',
         authors: authorStr,
-        year: item['published-print']?.['date-parts']?.[0]?.[0]
-          || item['published-online']?.['date-parts']?.[0]?.[0],
+        year,
         journal: item['container-title']?.[0] || '',
       };
     });
