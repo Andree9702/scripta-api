@@ -11,6 +11,7 @@ export default function handler(req, res) {
       { path: '/api/journal-match', method: 'POST', description: 'Matching de revistas con CrossRef + evaluación de fit' },
       { path: '/api/cover-letter', method: 'POST', description: 'Generador de cover letter para el editor' },
       { path: '/api/integrity-check', method: 'POST', description: 'Análisis de integridad científica (4 dimensiones)' },
+      { path: '/api/virtual-committee', method: 'POST', description: 'Simulador de defensa de tesis (5 evaluadores)' },
       { path: '/api/order-status', method: 'GET', description: 'Seguimiento de pedidos (code=SC-XXXX)' },
       { path: '/api/health', method: 'GET', description: 'Health check' },
       { path: '/api/stats', method: 'GET', description: 'Info del servicio' },
