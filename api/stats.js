@@ -7,6 +7,7 @@ export default function handler(req, res) {
     endpoints: [
       { path: '/api/generate-sample', method: 'POST', description: 'Genera muestra académica' },
       { path: '/api/diagnose-manuscript', method: 'POST', description: 'Diagnóstico de manuscrito (6 dimensiones)' },
+      { path: '/api/integrity-check', method: 'POST', description: 'Análisis de integridad científica (4 dimensiones)' },
       { path: '/api/order-status', method: 'GET', description: 'Seguimiento de pedidos (code=SC-XXXX)' },
       { path: '/api/health', method: 'GET', description: 'Health check' },
       { path: '/api/stats', method: 'GET', description: 'Info del servicio' },
