@@ -18,8 +18,9 @@ const rateLimitMap = new Map();
 // ─── CrossRef citation lookup ──────────────────────────────────────────────────
 
 async function fetchRealCitations(tema, disciplina) {
+  // CrossRef works best with English keywords; keep original query as fallback context
   const query = encodeURIComponent(`${tema} ${disciplina}`);
-  const url = `https://api.crossref.org/works?query=${query}&rows=3&sort=relevance&select=DOI,title,author,published-print,published-online,container-title`;
+  const url = `https://api.crossref.org/works?query=${query}&rows=5&sort=relevance&filter=has-abstract:true&select=DOI,title,author,published-print,published-online,container-title`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CROSSREF_TIMEOUT_MS);
@@ -32,18 +33,31 @@ async function fetchRealCitations(tema, disciplina) {
     clearTimeout(timer);
     const data = await response.json();
 
-    return data.message.items.map(item => ({
-      doi: item.DOI,
-      title: item.title?.[0] || '',
-      authors: (item.author || [])
-        .map(a => `${a.family || ''}, ${a.given?.[0] || ''}.`)
-        .slice(0, 3)
-        .join('; '),
-      year: item['published-print']?.['date-parts']?.[0]?.[0]
-        || item['published-online']?.['date-parts']?.[0]?.[0]
-        || '2024',
-      journal: item['container-title']?.[0] || '',
-    }));
+    const items = (data.message?.items || [])
+      .filter(item => {
+        // Must have at least one author with a family name and a valid year
+        const hasAuthor = item.author?.some(a => a.family);
+        const year = item['published-print']?.['date-parts']?.[0]?.[0]
+          || item['published-online']?.['date-parts']?.[0]?.[0];
+        return hasAuthor && year && year >= 2015;
+      })
+      .slice(0, 3);
+
+    return items.map(item => {
+      const authors = (item.author || []).filter(a => a.family);
+      const authorStr = authors.length <= 2
+        ? authors.map(a => `${a.family}, ${(a.given || '').charAt(0)}.`).join(' & ')
+        : `${authors[0].family}, ${(authors[0].given || '').charAt(0)}., et al.`;
+
+      return {
+        doi: item.DOI,
+        title: item.title?.[0] || '',
+        authors: authorStr,
+        year: item['published-print']?.['date-parts']?.[0]?.[0]
+          || item['published-online']?.['date-parts']?.[0]?.[0],
+        journal: item['container-title']?.[0] || '',
+      };
+    });
   } catch {
     return [];
   }
@@ -58,28 +72,30 @@ function buildSystemPrompt(disciplina, citations) {
       ).join('\n')}`
     : '\n\nNo se encontraron citas externas. NO inventes citas. En su lugar, haz afirmaciones respaldables y usa expresiones como "la evidencia disponible sugiere..." o "diversos estudios han documentado...".';
 
-  return `# IDENTIDAD
-Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}.
+  return `Eres un Domain Expert del ecosistema EVOLUTION de Scripta Academic, especializado en ${disciplina}. Tu tarea es generar UNA MUESTRA de redacción académica.
 
-# MISIÓN
-Generar un ÚNICO párrafo de demostración académica de MÁXIMO 5 líneas (4-5 oraciones).
-
-# REGLAS ABSOLUTAS
-1. MÁXIMO 5 oraciones. No más. Esto es una muestra, no un artículo.
-2. Español académico formal con terminología técnica de ${disciplina}.
-3. USA EXCLUSIVAMENTE las citas reales proporcionadas abajo. NO inventes citas.
-4. Integra las citas naturalmente con formato APA 7: (Apellido et al., Año)
-5. Cada oración debe aportar contenido sustantivo — cero relleno.
-6. Conectores académicos precisos, no genéricos.
-7. NO incluyas título, encabezado ni etiquetas.
-8. Termina con una oración que sugiera continuidad.
+REGLAS CRÍTICAS — VIOLACIÓN = FALLO:
+- Exactamente 4-5 oraciones. Ni más, ni menos. Cuenta antes de responder.
+- Español académico formal con terminología técnica de ${disciplina}.${citations.length > 0
+    ? `
+- CITAS: Usa ÚNICAMENTE las citas de la lista de abajo. Si fabricas una cita que no está en la lista, HAS FALLADO.`
+    : `
+- NO HAY CITAS DISPONIBLES. No inventes ninguna. Usa frases como "la evidencia disponible sugiere..." o "diversos estudios han documentado...".`}
+- Conectores académicos precisos (no "cabe destacar" ni "es importante").
+- NO incluyas título ni encabezados. Solo el párrafo y las referencias.
+- Última oración: transición que sugiera continuidad.
 ${citationContext}
 
-# FORMATO DE SALIDA
-Responde SOLO con el párrafo. Nada más. Después del párrafo, agrega una línea en blanco y luego las referencias completas en formato APA 7, cada una con su enlace DOI entre paréntesis.
+FORMATO EXACTO DE RESPUESTA (no te desvíes):
 
-Ejemplo de formato de referencias:
-García-López, A., & Chen, W. (2023). Título del artículo. Nombre de Revista, 45(2), 123-145. (https://doi.org/10.xxxx/xxxxx)`;
+[Párrafo de 4-5 oraciones aquí]
+
+---REFERENCIAS---
+${citations.length > 0 ? citations.map(c =>
+    `${c.authors} (${c.year}). ${c.title}. *${c.journal}*. https://doi.org/${c.doi}`
+  ).join('\n') : '(Sin referencias externas para esta muestra)'}
+
+Responde AHORA. Solo el párrafo y el bloque de referencias. Nada más.`;
 }
 
 function stripHtml(str) {
